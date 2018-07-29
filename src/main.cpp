@@ -1,5 +1,6 @@
 #define MY_RADIO_NRF24
 #define MY_DEBUG
+#define MY_NODE_ID 1
 
 #include <SPI.h>
 #include <MySensors.h>
@@ -15,21 +16,22 @@
 
 #define WATER_LEVEL_PIN 4
 
-#define TEMPERATURE_CHILD_ID 0
-#define FLOW_CHILD_ID 1
-#define VOLUME_CHILD_ID 2
-#define LEVEL_CHILD_ID 3
+#define RELAY_1_PIN 5
+
+#define TEMPERATURE_CHILD_ID 1
+#define WATER_CHILD_ID 2
+#define RELAY_1_ID 11
 
 MyMessage tempMsg(TEMPERATURE_CHILD_ID, V_TEMP);
-MyMessage flowMsg(FLOW_CHILD_ID, V_FLOW);
-MyMessage volumeMsg(VOLUME_CHILD_ID, V_VOLUME);
-MyMessage levelMsg(LEVEL_CHILD_ID, V_STATUS);
+MyMessage flowMsg(WATER_CHILD_ID, V_FLOW);
+MyMessage volumeMsg(WATER_CHILD_ID, V_VOLUME);
+MyMessage levelMsg(WATER_CHILD_ID, V_VAR1);
 
 OneWire oneWire(WATER_TEMPERATURE_PIN);
 DallasTemperature sensors(&oneWire);
 Bounce debouncer = Bounce();
 
-volatile byte flowPulseCount;
+volatile uint32_t flowPulseCount;
 
 unsigned long volume;
 
@@ -48,13 +50,13 @@ void before() {
 }
 
 void presentation() {
-    sendSketchInfo("Aquarium sensors", "0.4");
+    sendSketchInfo("Aquarium sensors", "0.5");
     wait(500);
     present(TEMPERATURE_CHILD_ID, S_TEMP, "Water temperature");
     wait(500);
-    present(FLOW_CHILD_ID, S_WATER, "Water flow");
+    present(WATER_CHILD_ID, S_WATER, "Water flow/level");
     wait(500);
-    present(LEVEL_CHILD_ID, S_BINARY, "Water level");
+    present(RELAY_1_ID, S_BINARY, "Relay 1");
     wait(500);
 }
 
@@ -63,6 +65,9 @@ void setup() {
 
     pinMode(WATER_FLOW_PIN, INPUT_PULLUP);
     pinMode(WATER_LEVEL_PIN, INPUT_PULLUP);
+    pinMode(RELAY_1_PIN, OUTPUT);
+
+    digitalWrite(RELAY_1_PIN, HIGH);
 
     flowPulseCount = 0;
     volume = 0;
@@ -75,37 +80,35 @@ void setup() {
     attachInterrupt(WATER_FLOW_INTERRUPT, pulseCounter, FALLING);
 }
 
-void updateFlow() {
+void updateFlow(unsigned long deltaTime) {
     detachInterrupt(WATER_FLOW_INTERRUPT);
 
-    float flowRate = ((1000.0 / (millis() - oldTime)) * flowPulseCount) / WATER_FLOW_CALIBRATION;
+    float flowRate = ((1000.0 / deltaTime) * flowPulseCount) / WATER_FLOW_CALIBRATION;
 
-    oldTime = millis();
+    // unsigned int flowMilliLitres = (flowRate / 60) * 1000;
 
-    unsigned int flowMilliLitres = (flowRate / 60) * 1000;
+    // volume += flowMilliLitres;
 
-    volume += flowMilliLitres;
+    // Serial.print("Flow rate: ");
+    // Serial.print(flowRate);
+    // Serial.println("L/min");
 
-    Serial.print("Flow rate: ");
-    Serial.print(flowRate);
-    Serial.println("L/min");
-
-    Serial.print("Liquid Quantity: ");
-    Serial.print(volume);
-    Serial.println("mL");
-    Serial.print("\t"); // Print tab space
-    Serial.print(volume / 1000);
-    Serial.println("L");
+    // Serial.print("Liquid Quantity: ");
+    // Serial.print(volume);
+    // Serial.println("mL");
+    // Serial.print("\t"); // Print tab space
+    // Serial.print(volume / 1000);
+    // Serial.println("L");
 
     if (flowRate != oldFlowRate) {
-        send(flowMsg.set(flowRate, 2));
         oldFlowRate = flowRate;
+        send(flowMsg.set(flowRate, 2));
     }
 
-    if (volume != oldVolume) {
-        send(volumeMsg.set(volume, 3));
-        oldVolume = volume;
-    }
+    // if (volume != oldVolume) {
+    //     send(volumeMsg.set(volume, 3));
+    //     oldVolume = volume;
+    // }
 
     flowPulseCount = 0;
 
@@ -140,9 +143,19 @@ void updateLevel() {
 void loop() {
     debouncer.update();
 
-    if ((millis() - oldTime) > 1000) {
-        updateFlow();
-        updateTemperature();
+    unsigned long now = millis();
+    unsigned long deltaTime = now - oldTime;
+    if (deltaTime > 1000) {
+        updateFlow(deltaTime);
+        // updateTemperature();
         updateLevel();
+        oldTime = now;
+    }
+}
+
+
+void receive(const MyMessage &message) {
+    if (message.sensor == RELAY_1_ID && message.type == V_STATUS) {
+        digitalWrite(RELAY_1_PIN, message.getBool() ? LOW : HIGH);
     }
 }
