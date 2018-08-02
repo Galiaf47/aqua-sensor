@@ -75,7 +75,7 @@ void setup() {
     oldTime = 0;
 
     debouncer.attach(WATER_LEVEL_PIN);
-    debouncer.interval(5000);
+    debouncer.interval(1000);
 
     attachInterrupt(WATER_FLOW_INTERRUPT, pulseCounter, FALLING);
 }
