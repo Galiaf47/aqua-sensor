@@ -67,7 +67,7 @@ void setup() {
     pinMode(WATER_LEVEL_PIN, INPUT_PULLUP);
     pinMode(RELAY_1_PIN, OUTPUT);
 
-    digitalWrite(RELAY_1_PIN, HIGH);
+    digitalWrite(RELAY_1_PIN, LOW);
 
     flowPulseCount = 0;
     volume = 0;
@@ -156,6 +156,6 @@ void loop() {
 
 void receive(const MyMessage &message) {
     if (message.sensor == RELAY_1_ID && message.type == V_STATUS) {
-        digitalWrite(RELAY_1_PIN, message.getBool() ? LOW : HIGH);
+        digitalWrite(RELAY_1_PIN, message.getBool() ? HIGH : LOW);
     }
 }
