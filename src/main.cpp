@@ -12,7 +12,6 @@
 
 #define WATER_FLOW_PIN 3
 #define WATER_FLOW_INTERRUPT 1 // 1 = pin 3
-#define WATER_FLOW_CALIBRATION 7.5
 
 #define WATER_LEVEL_PIN 4
 
@@ -21,33 +20,24 @@
 #define RELAY_3_PIN 7
 #define RELAY_4_PIN 8
 
-#define TEMPERATURE_CHILD_ID 1
-#define WATER_CHILD_ID 2
-#define RELAY_1_ID 11
-#define RELAY_2_ID 12
-#define RELAY_3_ID 13
-#define RELAY_4_ID 14
+#define SENSORS_CHILD_ID 1
 
-#define SEND_INTERVAL 10000
+#define SEND_INTERVAL 30000
 
-MyMessage tempMsg(TEMPERATURE_CHILD_ID, V_TEMP);
-MyMessage flowMsg(WATER_CHILD_ID, V_FLOW);
-MyMessage volumeMsg(WATER_CHILD_ID, V_VOLUME);
-MyMessage levelMsg(WATER_CHILD_ID, V_VAR1);
-MyMessage relay1Msg(RELAY_1_ID, V_STATUS);
-MyMessage relay2Msg(RELAY_2_ID, V_STATUS);
-MyMessage relay3Msg(RELAY_3_ID, V_STATUS);
-MyMessage relay4Msg(RELAY_4_ID, V_STATUS);
+MyMessage sensorsMsg(SENSORS_CHILD_ID, V_TEXT);
 
 OneWire oneWire(WATER_TEMPERATURE_PIN);
 DallasTemperature sensors(&oneWire);
 Bounce debouncer = Bounce();
 
 volatile uint32_t flowPulseCount;
+float flowRate;
+uint8_t flowRateSamples;
 
 bool level;
+
 float temperature;
-float flowRate;
+uint8_t temperatureSamples;
 
 bool relay1Status;
 bool relay2Status;
@@ -65,19 +55,9 @@ void before() {
 }
 
 void presentation() {
-    sendSketchInfo("Aquarium sensors", "1.0");
+    sendSketchInfo("Aquarium sensors", "1.1");
     wait(500);
-    present(TEMPERATURE_CHILD_ID, S_TEMP, "Water temperature");
-    wait(500);
-    present(WATER_CHILD_ID, S_WATER, "Water flow/level");
-    wait(500);
-    present(RELAY_1_ID, S_BINARY, "Relay 1");
-    wait(500);
-    present(RELAY_2_ID, S_BINARY, "Relay 2");
-    wait(500);
-    present(RELAY_3_ID, S_BINARY, "Relay 3");
-    wait(500);
-    present(RELAY_4_ID, S_BINARY, "Relay 4");
+    present(SENSORS_CHILD_ID, S_INFO, "Sensors");
     wait(500);
 }
 
@@ -100,10 +80,13 @@ void setup() {
     sensors.requestTemperatures();
     
     flowPulseCount = 0;
+    flowRate = 0;
+    flowRateSamples = 0;
 
     level = 0;
+
     temperature = 0;
-    flowRate = 0;
+    temperatureSamples = 0;
 
     updateTime = 0;
     sendTime = 0;
@@ -120,28 +103,24 @@ void setup() {
 }
 
 void updateFlow(unsigned long deltaTime) {
-    // flowRate = ((1000.0 / deltaTime) * flowPulseCount) / WATER_FLOW_CALIBRATION;
-    flowRate = (((1000.0 / deltaTime) * flowPulseCount) * 60 / WATER_FLOW_CALIBRATION);
+    flowRate += (1000.0 / deltaTime * flowPulseCount);
+    flowRateSamples++;
     flowPulseCount = 0;
-
-    Serial.print("Flow rate: ");
-    Serial.print(flowRate);
-    Serial.println("L/hour");
 }
 
 void updateTemperature() {
-    temperature = sensors.getTempCByIndex(0);
-    sensors.requestTemperatures();
+    float currentTemperature = sensors.getTempCByIndex(0);
     
-    Serial.print("Temperature: ");
-    Serial.println(temperature);
+    if (currentTemperature != -127) {
+        temperature += currentTemperature;
+        temperatureSamples++;
+    }
+    
+    sensors.requestTemperatures();
 }
 
 void updateLevel() {
     level = debouncer.read();
-
-    Serial.print("Level: ");
-    Serial.println(level);
 }
 
 void loop() {
@@ -160,44 +139,60 @@ void loop() {
     if (now - sendTime > SEND_INTERVAL) {
         sendTime = now;
 
-        wait(500);
-        send(flowMsg.set(flowRate, 2));
-        wait(500);
-        send(tempMsg.set(temperature, 1));
-        wait(500);
-        send(levelMsg.set(level));
+        if (temperatureSamples != 0) {
+            temperature = temperature / temperatureSamples;
+            temperatureSamples = 1;
+        }
 
-        wait(500);
-        send(relay1Msg.set(relay1Status));
-        wait(500);
-        send(relay2Msg.set(relay2Status));
-        wait(500);
-        send(relay3Msg.set(relay3Status));
-        wait(500);
-        send(relay4Msg.set(relay4Status));
+        if (flowRateSamples != 0) {
+            flowRate = flowRate / flowRateSamples;
+            flowRateSamples = 1;
+        }
+
+        String result = "";
+        result = result
+            + temperature + ":"
+            + flowRate + ":"
+            + level + ":"
+            + relay1Status + ":"
+            + relay2Status + ":"
+            + relay3Status + ":"
+            + relay4Status;
+
+        send(sensorsMsg.set(result.c_str()));
     }
 }
 
 void receive(const MyMessage &message) {
-    if (message.type == V_STATUS) {
-        if (message.sensor == RELAY_1_ID) {
-            relay1Status = message.getBool();
-            digitalWrite(RELAY_1_PIN, relay1Status ? HIGH : LOW);
-        }
+    if (message.type == V_TEXT) {
+        const char * command = message.getString();
 
-        if (message.sensor == RELAY_2_ID) {
-            relay2Status = message.getBool();
-            digitalWrite(RELAY_2_PIN, relay2Status ? HIGH : LOW);
-        }
+        if (command[0] == 'r') {
+            uint8_t pin;
+            uint8_t state = command[3] - '0';
 
-        if (message.sensor == RELAY_3_ID) {
-            relay3Status = message.getBool();
-            digitalWrite(RELAY_3_PIN, relay3Status ? HIGH : LOW);
-        }
-        
-        if (message.sensor == RELAY_4_ID) {
-            relay4Status = message.getBool();
-            digitalWrite(RELAY_4_PIN, relay4Status ? HIGH : LOW);
+            switch (command[1]) {
+                case '1':
+                    pin = RELAY_1_PIN;
+                    relay1Status = state;
+                    break;
+                case '2':
+                    pin = RELAY_2_PIN;
+                    relay2Status = state;
+                    break;
+                case '3':
+                    pin = RELAY_3_PIN;
+                    relay3Status = state;
+                    break;
+                case '4':
+                    pin = RELAY_4_PIN;
+                    relay4Status = state;
+                    break;
+                default:
+                    return;
+            }
+
+            digitalWrite(pin, state ? HIGH : LOW);
         }
     }
 }

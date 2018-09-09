@@ -20,4 +20,4 @@ Sensors and relays are not coupled, sensors send information to controller, rela
 
 **Arduino uno:** platformio run -e uno
 
-**Arduino pro mini:** platformio run -e pro -t program
+**Arduino pro mini:** platformio run -e pro -t upload
